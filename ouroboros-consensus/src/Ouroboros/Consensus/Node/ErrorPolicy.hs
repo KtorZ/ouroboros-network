@@ -98,15 +98,14 @@ consensusErrorPolicy pb = ErrorPolicies {
           -- because we have diverged too much.
         , ErrorPolicy $ \(e :: ChainSyncClientException) ->
             case e of
-              HeaderExceedsClockSkew{} -> Just misconfiguredPeer
-              ForkTooDeep{}            -> Just distantPeer
-              HeaderError{}            -> Just theyBuggyOrEvil
-              InvalidRollForward{}     -> Just distantPeer
-              InvalidRollBack{}        -> Just theyBuggyOrEvil
-              InvalidIntersection{}    -> Just theyBuggyOrEvil
-              NoMoreIntersection{}     -> Just distantPeer
-              DoesntFit{}              -> Just theyBuggyOrEvil
-              InvalidBlock{}           -> Just theyBuggyOrEvil
+              ForkTooDeep{}         -> Just distantPeer
+              HeaderError{}         -> Just theyBuggyOrEvil
+              InvalidRollForward{}  -> Just distantPeer
+              InvalidRollBack{}     -> Just theyBuggyOrEvil
+              InvalidIntersection{} -> Just theyBuggyOrEvil
+              NoMoreIntersection{}  -> Just distantPeer
+              DoesntFit{}           -> Just theyBuggyOrEvil
+              InvalidBlock{}        -> Just theyBuggyOrEvil
 
           -- Dispatch on nested exception
         , ErrorPolicy $ \(ExceptionInLinkedThread _ e) ->
@@ -127,8 +126,13 @@ consensusErrorPolicy pb = ErrorPolicies {
 
     -- Peer sent us wrong data, but it's more than likely due to a
     -- misconfiguration. We try to reconnect in a few minutes
-    misconfiguredPeer :: SuspendDecision DiffTime
-    misconfiguredPeer = SuspendPeer defaultDelay defaultDelay
+    --
+    -- TODO: This was used in response to the 'HeaderExceedsClockSkew'
+    -- exception from the chain sync client, which no longer exists. However,
+    -- a similar exception will be reintroduced once we extend the Chain DB
+    -- to mark blocks that exceed the clock skew as invalid.
+    _misconfiguredPeer :: SuspendDecision DiffTime
+    _misconfiguredPeer = SuspendPeer defaultDelay defaultDelay
 
     -- Peer is either on a distant chain (one that forks more than k blocks ago)
     -- or else is just too far behind; the chain sync client doesn't really have

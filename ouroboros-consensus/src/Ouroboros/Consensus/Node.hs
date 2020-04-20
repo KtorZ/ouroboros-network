@@ -1,6 +1,5 @@
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE NamedFieldPuns      #-}
-{-# LANGUAGE NumericUnderscores  #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -53,9 +52,10 @@ import           Ouroboros.Network.NodeToNode (MiniProtocolParameters (..),
 
 import           Ouroboros.Consensus.BlockchainTime
 import           Ouroboros.Consensus.Config
+import           Ouroboros.Consensus.Fragment.InFuture (CheckInFuture,
+                     ClockSkew)
+import qualified Ouroboros.Consensus.Fragment.InFuture as InFuture
 import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState (..))
-import           Ouroboros.Consensus.MiniProtocol.ChainSync.Client
-                     (ClockSkew (..))
 import qualified Ouroboros.Consensus.Network.NodeToClient as NTC
 import qualified Ouroboros.Consensus.Network.NodeToNode as NTN
 import           Ouroboros.Consensus.Node.DbMarker
@@ -138,6 +138,9 @@ data RunNodeArgs blk = RunNodeArgs {
     , rnNodeKernelHook :: ResourceRegistry IO
                        -> NodeKernel IO RemoteConnectionId LocalConnectionId blk
                        -> IO ()
+
+      -- | Maximum clock skew
+    , rnMaxClockSkew :: ClockSkew
     }
 
 -- | Start a node.
@@ -160,6 +163,12 @@ run RunNodeArgs{..} = do
         (blockchainTimeTracer rnTraceConsensus)
         (nodeStartTime (Proxy @blk) cfg)
         slotLength
+
+      let inFuture :: CheckInFuture IO blk
+          inFuture = InFuture.reference
+                       cfg
+                       (nodeStartTime (Proxy @blk) cfg)
+                       rnMaxClockSkew
 
       -- When we shut down cleanly, we create a marker file so that the next
       -- time we start, we know we don't have to validate the contents of the
@@ -190,7 +199,7 @@ run RunNodeArgs{..} = do
 
         (_, chainDB) <- allocate registry
           (\_ -> openChainDB
-            rnTraceDB registry btime rnDatabasePath cfg initLedger
+            rnTraceDB registry inFuture rnDatabasePath cfg initLedger
             customiseChainDbArgs')
           ChainDB.closeDB
 
@@ -298,7 +307,7 @@ openChainDB
   :: forall blk. RunNode blk
   => Tracer IO (ChainDB.TraceEvent blk)
   -> ResourceRegistry IO
-  -> BlockchainTime IO
+  -> CheckInFuture IO blk
   -> FilePath
      -- ^ Database path
   -> TopLevelConfig blk
@@ -307,19 +316,19 @@ openChainDB
   -> (ChainDbArgs IO blk -> ChainDbArgs IO blk)
       -- ^ Customise the 'ChainDbArgs'
   -> IO (ChainDB IO blk)
-openChainDB tracer registry btime dbPath cfg initLedger customiseArgs =
+openChainDB tracer registry inFuture dbPath cfg initLedger customiseArgs =
     ChainDB.openDB args
   where
     args :: ChainDbArgs IO blk
     args = customiseArgs $
-             mkChainDbArgs tracer registry btime dbPath cfg initLedger
+             mkChainDbArgs tracer registry inFuture dbPath cfg initLedger
              (nodeImmDbChunkInfo (Proxy @blk) cfg)
 
 mkChainDbArgs
   :: forall blk. RunNode blk
   => Tracer IO (ChainDB.TraceEvent blk)
   -> ResourceRegistry IO
-  -> BlockchainTime IO
+  -> CheckInFuture IO blk
   -> FilePath
      -- ^ Database path
   -> TopLevelConfig blk
@@ -327,7 +336,7 @@ mkChainDbArgs
      -- ^ Initial ledger
   -> ChunkInfo
   -> ChainDbArgs IO blk
-mkChainDbArgs tracer registry btime dbPath cfg initLedger
+mkChainDbArgs tracer registry inFuture dbPath cfg initLedger
               chunkInfo = (ChainDB.defaultArgs dbPath)
     { ChainDB.cdbBlocksPerFile        = mkBlocksPerFile 1000
     , ChainDB.cdbDecodeBlock          = nodeDecodeBlock          bcfg
@@ -355,7 +364,7 @@ mkChainDbArgs tracer registry btime dbPath cfg initLedger
     , ChainDB.cdbTracer               = tracer
     , ChainDB.cdbImmValidation        = ValidateMostRecentChunk
     , ChainDB.cdbVolValidation        = NoValidation
-    , ChainDB.cdbBlockchainTime       = btime
+    , ChainDB.cdbCheckInFuture        = inFuture
     }
   where
     k    = configSecurityParam cfg
@@ -374,7 +383,6 @@ mkNodeArgs
 mkNodeArgs registry cfg initState tracers btime chainDB = NodeArgs
     { tracers
     , registry
-    , maxClockSkew           = ClockSkew 1
     , cfg
     , initState
     , btime

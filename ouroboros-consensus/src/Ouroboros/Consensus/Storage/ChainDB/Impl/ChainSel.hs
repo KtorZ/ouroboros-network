@@ -37,17 +37,13 @@ import qualified Data.Set as Set
 import           Data.Word (Word64)
 import           GHC.Stack (HasCallStack)
 
-import           Cardano.Prelude (forceElemsToWHNF)
-
 import           Ouroboros.Network.AnchoredFragment (Anchor,
                      AnchoredFragment (..))
 import qualified Ouroboros.Network.AnchoredFragment as AF
-import           Ouroboros.Network.Block (BlockNo, HasHeader (..), HeaderHash,
-                     Point, SlotNo, castHash, castPoint, pointHash)
+import           Ouroboros.Network.Block
 import           Ouroboros.Network.Point (WithOrigin (..))
 
 import           Ouroboros.Consensus.Block
-import           Ouroboros.Consensus.BlockchainTime (BlockchainTime (..))
 import           Ouroboros.Consensus.Config
 import           Ouroboros.Consensus.Fragment.Validated (ValidatedFragment)
 import qualified Ouroboros.Consensus.Fragment.Validated as VF
@@ -86,9 +82,8 @@ initialChainSelection
   -> Tracer m (TraceEvent blk)
   -> TopLevelConfig blk
   -> StrictTVar m (WithFingerprint (InvalidBlocks blk))
-  -> SlotNo -- ^ Current slot
   -> m (ChainAndLedger blk)
-initialChainSelection immDB volDB lgrDB tracer cfg varInvalid curSlot = do
+initialChainSelection immDB volDB lgrDB tracer cfg varInvalid = do
     -- We follow the steps from section "## Initialization" in ChainDB.md
 
     i :: Anchor blk <- ImmDB.getAnchorForTip immDB
@@ -126,8 +121,7 @@ initialChainSelection immDB volDB lgrDB tracer cfg varInvalid curSlot = do
                                  m
                                  (AnchoredFragment (Header blk))
         constructChain hashes =
-          AF.fromOldestFirst (AF.castAnchor i) .
-          takeWhile ((<= curSlot) . blockSlot) <$>
+          AF.fromOldestFirst (AF.castAnchor i) <$>
           mapM (getKnownHeaderThroughCache volDB) (NE.toList hashes)
 
     -- | Perform chain selection (including validation) on the given
@@ -209,9 +203,6 @@ addBlockSync
   -> BlockToAdd m blk
   -> m ()
 addBlockSync cdb@CDB {..} BlockToAdd { blockToAdd = b, .. } = do
-    -- No need to be in the same STM transaction
-    curSlot <- atomically $ getCurrentSlot cdbBlockchainTime
-
     (isMember, invalid, curChain) <- atomically $ (,,)
       <$> VolDB.getIsMember               cdbVolDB
       <*> (forgetFingerprint <$> readTVar cdbInvalid)
@@ -236,17 +227,6 @@ addBlockSync cdb@CDB {..} BlockToAdd { blockToAdd = b, .. } = do
         trace $ IgnoreInvalidBlock (blockRealPoint b) reason
         deliverPromises False curTip
 
-      -- ### Store but schedule chain selection
-      | blockSlot b > curSlot -> do
-        VolDB.putBlock cdbVolDB b
-        trace $ AddedBlockToVolDB (blockRealPoint b) (blockNo b) (cdbIsEBB hdr)
-        atomically $ putTMVar varBlockWrittenToDisk True
-        atomically $ putTMVar varBlockProcessed curTip
-        -- We'll fill in 'varChainSelectionPerformed' when the scheduled chain
-        -- selection is performed.
-        trace $ BlockInTheFuture (blockRealPoint b) curSlot
-        scheduleChainSelection curSlot (blockSlot b)
-
       -- The remaining cases
       | otherwise -> do
         VolDB.putBlock cdbVolDB b
@@ -269,22 +249,6 @@ addBlockSync cdb@CDB {..} BlockToAdd { blockToAdd = b, .. } = do
       putTMVar varBlockWrittenToDisk      writtenToDisk
       putTMVar varBlockProcessed          tip
       putTMVar varChainSelectionPerformed tip
-
-    scheduleChainSelection
-      :: SlotNo  -- ^ Current slot number
-      -> SlotNo  -- ^ Slot number of the block
-      -> m ()
-    scheduleChainSelection curSlot slot = do
-      nbScheduled <- atomically $ updateTVar cdbFutureBlocks $ \futureBlocks ->
-        let futureBlockToAdd = FutureBlockToAdd hdr varChainSelectionPerformed
-            futureBlocks' = Map.insertWith strictAppend slot
-              (forceElemsToWHNF (futureBlockToAdd NE.:| [])) futureBlocks
-            nbScheduled   = fromIntegral $ sum $ length <$> Map.elems futureBlocks
-        in (futureBlocks', nbScheduled)
-      trace $ ScheduledChainSelection (headerPoint hdr) curSlot nbScheduled
-
-    strictAppend :: (Semigroup (t a), Foldable t) => t a -> t a -> t a
-    strictAppend x y = forceElemsToWHNF (x <> y)
 
 -- | Return 'True' when the given header should be ignored when adding it
 -- because it is too old, i.e., we wouldn't be able to switch to a chain
@@ -363,8 +327,6 @@ chainSelectionForBlock
   -> Header blk
   -> m (Point blk)
 chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
-    curSlot <- atomically $ getCurrentSlot cdbBlockchainTime
-
     (invalid, succsOf, predecessor, curChain, tipPoint, ledgerDB)
       <- atomically $ (,,,,,)
           <$> (forgetFingerprint <$> readTVar cdbInvalid)
@@ -392,7 +354,6 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
         succsOf'     = ignoreInvalidSuc cdb invalid succsOf
 
     -- The preconditions
-    assert (blockSlot hdr <= curSlot)  $ return ()
     assert (isJust $ predecessor (headerHash hdr)) $ return ()
 
     if
@@ -411,12 +372,12 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
       | pointHash tipPoint == castHash (blockPrevHash hdr) -> do
         -- ### Add to current chain
         trace (TryAddToCurrentChain p)
-        addToCurrentChain succsOf' curChainAndLedger curSlot
+        addToCurrentChain succsOf' curChainAndLedger
 
       | Just hashes <- VolDB.isReachable predecessor' i p -> do
         -- ### Switch to a fork
         trace (TrySwitchToAFork p hashes)
-        switchToAFork succsOf' curChainAndLedger hashes curSlot
+        switchToAFork succsOf' curChainAndLedger hashes
 
       | otherwise -> do
         -- ### Store but don't change the current chain
@@ -442,11 +403,9 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
                       => (WithOrigin (HeaderHash blk) -> Set (HeaderHash blk))
                       -> ChainAndLedger blk
                          -- ^ The current chain and ledger
-                      -> SlotNo
-                         -- ^ The current slot
                       -> m (Point blk)
     addToCurrentChain succsOf curChainAndLedger
-                      curSlot = assert (AF.validExtension curChain hdr) $ do
+                    = assert (AF.validExtension curChain hdr) $ do
         let suffixesAfterB = VolDB.candidates succsOf (realPointToPoint p)
 
         -- Fragments that are anchored at @curHead@, i.e. suffixes of the
@@ -461,10 +420,8 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
             -- up the headers /after/ b, so they won't be on the current
             -- chain.
             flip evalStateT Map.empty $ forM suffixesAfterB' $ \hashes -> do
-              -- Ignore headers/blocks from the future
-              hdrs <- fmap (takeWhile ((<= curSlot) . blockSlot)) $
-                mapM (getKnownHeaderThroughCache cdbVolDB) $
-                NE.toList hashes
+              hdrs <- mapM (getKnownHeaderThroughCache cdbVolDB) $
+                        NE.toList hashes
               return $ AF.fromOldestFirst curHead (hdr : hdrs)
 
         let candidateSuffixes = NE.nonEmpty
@@ -507,11 +464,8 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
                      -- ^ The current chain (anchored at @i@) and ledger
                   -> NonEmpty (HeaderHash blk)
                      -- ^ An uninterrupted path of hashes @(i,b]@.
-                  -> SlotNo
-                     -- ^ The current slot
                   -> m (Point blk)
-    switchToAFork succsOf curChainAndLedger hashes
-                  curSlot = do
+    switchToAFork succsOf curChainAndLedger hashes = do
         let suffixesAfterB = VolDB.candidates succsOf (realPointToPoint p)
             initCache      = Map.insert (headerHash hdr) hdr (cacheHeaders curChain)
         -- Fragments that are anchored at @i@.
@@ -519,8 +473,8 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
           case NE.nonEmpty suffixesAfterB of
             -- If there are no suffixes after @b@, just use the fragment that
             -- ends in @b@ as the sole candidate.
-            Nothing              -> (NE.:| []) <$> constructFork curSlot i hashes []
-            Just suffixesAfterB' -> mapM (constructFork curSlot i hashes . NE.toList)
+            Nothing              -> (NE.:| []) <$> constructFork i hashes []
+            Just suffixesAfterB' -> mapM (constructFork i hashes . NE.toList)
                                          suffixesAfterB'
         let candidateSuffixes =
                 -- The suffixes all fork off from the current chain within @k@
@@ -678,8 +632,7 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
     -- are actually on the current chain, so when possible, we reuse these
     -- headers instead of reading them from disk.
     constructFork
-      :: SlotNo                     -- ^ Current slot
-      -> Anchor blk                 -- ^ Tip of ImmutableDB @i@
+      :: Anchor blk                 -- ^ Tip of ImmutableDB @i@
       -> NonEmpty (HeaderHash blk)  -- ^ Hashes of @(i,b]@
       -> [HeaderHash blk]           -- ^ Suffix @s@, hashes of @(b,?]@
       -> StateT (Map (HeaderHash blk) (Header blk))
@@ -687,9 +640,8 @@ chainSelectionForBlock cdb@CDB{..} blockCache hdr = do
                 (AnchoredFragment (Header blk))
          -- ^ Fork, anchored at @i@, contains (the header of) @b@ and ends
          -- with the suffix @s@.
-    constructFork curSlot i hashes suffixHashes
-      = fmap (AF.fromOldestFirst (AF.castAnchor i)
-      .       takeWhile ((<= curSlot) . blockSlot))
+    constructFork i hashes suffixHashes
+      = fmap (AF.fromOldestFirst (AF.castAnchor i))
       $ mapM (getKnownHeaderThroughCache cdbVolDB)
       $ NE.toList hashes <> suffixHashes
 

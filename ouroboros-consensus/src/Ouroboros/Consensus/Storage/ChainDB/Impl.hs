@@ -39,7 +39,6 @@ import           Ouroboros.Network.Block (pattern BlockPoint,
                      pattern GenesisPoint, HasHeader, Point, castPoint)
 
 import           Ouroboros.Consensus.Block (Header, toIsEBB)
-import           Ouroboros.Consensus.BlockchainTime (getCurrentSlot)
 import qualified Ouroboros.Consensus.Fragment.Validated as VF
 import           Ouroboros.Consensus.Ledger.SupportsProtocol
 import           Ouroboros.Consensus.Util (whenJust)
@@ -106,7 +105,6 @@ openDBInternal args launchBgTasks = do
 
     varInvalid <- newTVarM (WithFingerprint Map.empty (Fingerprint 0))
 
-    curSlot        <- atomically $ getCurrentSlot (Args.cdbBlockchainTime args)
     chainAndLedger <- ChainSel.initialChainSelection
       immDB
       volDB
@@ -114,7 +112,6 @@ openDBInternal args launchBgTasks = do
       tracer
       (Args.cdbTopLevelConfig args)
       varInvalid
-      curSlot
 
     let chain  = VF.validatedFragment chainAndLedger
         ledger = VF.validatedLedger   chainAndLedger
@@ -151,7 +148,7 @@ openDBInternal args launchBgTasks = do
                   , cdbChunkInfo       = Args.cdbChunkInfo args
                   , cdbIsEBB           = toIsEBB . isJust . Args.cdbIsEBB args
                   , cdbCheckIntegrity  = Args.cdbCheckIntegrity args
-                  , cdbBlockchainTime  = Args.cdbBlockchainTime args
+                  , cdbCheckInFuture   = Args.cdbCheckInFuture args
                   , cdbBlocksToAdd     = blocksToAdd
                   , cdbFutureBlocks    = varFutureBlocks
                   }

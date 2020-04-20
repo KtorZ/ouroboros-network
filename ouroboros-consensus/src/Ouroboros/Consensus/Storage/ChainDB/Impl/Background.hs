@@ -37,7 +37,6 @@ module Ouroboros.Consensus.Storage.ChainDB.Impl.Background
   , addBlockRunner
     -- * Executing scheduled chain selections
   , scheduledChainSelection
-  , scheduledChainSelectionRunner
   ) where
 
 import           Control.Exception (assert)
@@ -62,7 +61,6 @@ import           Ouroboros.Network.Block (ChainHash (..), HasHeader, Point,
 import           Ouroboros.Network.Point (WithOrigin (..))
 
 import           Ouroboros.Consensus.Block
-import           Ouroboros.Consensus.BlockchainTime (onKnownSlotChange)
 import           Ouroboros.Consensus.Config
 import           Ouroboros.Consensus.Ledger.SupportsProtocol
 import           Ouroboros.Consensus.Protocol.Abstract
@@ -98,9 +96,8 @@ launchBgTasks cdb@CDB{..} replayed = do
       gcScheduleRunner gcSchedule $ garbageCollect cdb
     !copyAndSnapshotThread <- launch "ChainDB.copyAndSnapshotRunner" $
       copyAndSnapshotRunner cdb gcSchedule replayed
-    !chainSyncThread <- scheduledChainSelectionRunner cdb
     atomically $ writeTVar cdbKillBgThreads $
-      sequence_ [addBlockThread, gcThread, copyAndSnapshotThread, chainSyncThread]
+      sequence_ [addBlockThread, gcThread, copyAndSnapshotThread]
   where
     launch :: String -> m Void -> m (m ())
     launch = fmap cancelThread .: forkLinkedThread cdbRegistry
@@ -528,6 +525,8 @@ addBlockRunner cdb@CDB{..} = forever $ do
 -- | Retrieve the 'FutureBlockToAdd's from 'cdbFutureBlocks' for which chain
 -- selection was scheduled at the current slot. Run chain selection for each
 -- of them.
+--
+-- TODO: We will need to get rid of `curSlot` here and use current /time/.
 scheduledChainSelection
   :: (IOLike m, LedgerSupportsProtocol blk, HasCallStack)
   => ChainDbEnv m blk
@@ -567,18 +566,3 @@ scheduledChainSelection cdb@CDB{..} curSlot = do
         newTip <- chainSelectionForBlock cdb BlockCache.empty hdr
         -- Important: notify that chain selection has been performed for the block
         atomically $ putTMVar varChainSelectionPerformed newTip
-
--- | Whenever the current slot changes, call 'scheduledChainSelection' for the
--- (new) current slot.
---
--- This function forks of a background thread and terminates afterwards,
--- returning a handle to kill the background thread.
-scheduledChainSelectionRunner
-  :: (IOLike m, LedgerSupportsProtocol blk, HasCallStack)
-  => ChainDbEnv m blk -> m (m ())
-scheduledChainSelectionRunner cdb@CDB{..} =
-    onKnownSlotChange
-      cdbRegistry
-      cdbBlockchainTime
-      "ChainDB.scheduledChainSelection"
-      (scheduledChainSelection cdb)

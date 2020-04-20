@@ -75,8 +75,8 @@ import           Ouroboros.Network.Block (BlockNo, HasHeader, HeaderHash, Point,
 import           Ouroboros.Network.Point (WithOrigin)
 
 import           Ouroboros.Consensus.Block
-import           Ouroboros.Consensus.BlockchainTime (BlockchainTime)
 import           Ouroboros.Consensus.Config
+import           Ouroboros.Consensus.Fragment.InFuture (CheckInFuture)
 import           Ouroboros.Consensus.Ledger.Extended (ExtValidationError)
 import           Ouroboros.Consensus.Ledger.SupportsProtocol
 import           Ouroboros.Consensus.Util.IOLike
@@ -217,7 +217,7 @@ data ChainDbEnv m blk = CDB
   , cdbChunkInfo       :: !ImmDB.ChunkInfo
   , cdbIsEBB           :: !(Header blk -> IsEBB)
   , cdbCheckIntegrity  :: !(blk -> Bool)
-  , cdbBlockchainTime  :: !(BlockchainTime m)
+  , cdbCheckInFuture   :: !(CheckInFuture m blk)
   , cdbBlocksToAdd     :: !(BlocksToAdd m blk)
     -- ^ Queue of blocks that still have to be added.
   , cdbFutureBlocks    :: !(StrictTVar m (Map SlotNo (NonEmpty (FutureBlockToAdd m blk))))

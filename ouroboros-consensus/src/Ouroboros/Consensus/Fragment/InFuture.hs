@@ -3,6 +3,10 @@
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | Intended for qualified import
+--
+-- > import Ouroboros.Consensus.Fragment.InFuture (CheckInFuture(..), ClockSkew(..))
+-- > import qualified Ouroboros.Consensus.Fragment.InFuture as InFuture
 module Ouroboros.Consensus.Fragment.InFuture (
     CheckInFuture(..)
   , InFuture
@@ -23,6 +27,8 @@ import           Data.Word
 import           Control.Monad.Class.MonadSTM
 import           Control.Monad.Class.MonadTime
 
+import           Cardano.Prelude (NoUnexpectedThunks, OnlyCheckIsWHNF (..))
+
 import           Ouroboros.Network.AnchoredFragment
                      (AnchoredFragment ((:>), Empty))
 import           Ouroboros.Network.Block
@@ -41,6 +47,8 @@ data CheckInFuture m blk = CheckInFuture {
        checkInFuture :: ValidatedFragment (LedgerState blk) blk
                      -> m (AnchoredFragment (Header blk), [InFuture blk])
     }
+  deriving NoUnexpectedThunks
+       via OnlyCheckIsWHNF "CheckInFuture" (CheckInFuture m blk)
 
 -- | Header of block that we found to be in the future
 data InFuture blk = InFuture {

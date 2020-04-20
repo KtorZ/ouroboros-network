@@ -71,13 +71,12 @@ import qualified Ouroboros.Network.TxSubmission.Outbound as TxOutbound
 import           Ouroboros.Consensus.Block
 import           Ouroboros.Consensus.BlockchainTime
 import           Ouroboros.Consensus.Config
+import qualified Ouroboros.Consensus.Fragment.InFuture as InFuture
 import           Ouroboros.Consensus.Ledger.Abstract
 import           Ouroboros.Consensus.Ledger.Extended
 import           Ouroboros.Consensus.Ledger.SupportsProtocol
 import           Ouroboros.Consensus.Mempool
 import qualified Ouroboros.Consensus.MiniProtocol.BlockFetch.Server as BFServer
-import           Ouroboros.Consensus.MiniProtocol.ChainSync.Client
-                     (ClockSkew (..))
 import qualified Ouroboros.Consensus.MiniProtocol.ChainSync.Client as CSClient
 import qualified Ouroboros.Consensus.Network.NodeToNode as NTN
 import           Ouroboros.Consensus.Node.NetworkProtocolVersion
@@ -602,7 +601,9 @@ runThreadNetwork ThreadNetworkArgs
         , cdbIsEBB                = nodeIsEBB
         , cdbCheckIntegrity       = nodeCheckIntegrity cfg
         , cdbGenesis              = return initLedger
-        , cdbBlockchainTime       = testBlockchainTime btime
+        , cdbCheckInFuture        = InFuture.miracle
+                                      (testBlockchainTimeSlot btime)
+                                      1 -- One slot clock skew
         , cdbAddHdrEnv            = nodeAddHeaderEnvelope (Proxy @blk)
         , cdbImmDbCacheConfig     = Index.CacheConfig 2 60
         -- Misc
@@ -750,7 +751,6 @@ runThreadNetwork ThreadNetworkArgs
                 -- ChainDB
                 instrumentationTracers <> nullDebugTracers
             , registry
-            , maxClockSkew           = ClockSkew 1
             , cfg                    = pInfoConfig
             , initState              = pInfoInitState
             , btime                  = testBlockchainTime btime

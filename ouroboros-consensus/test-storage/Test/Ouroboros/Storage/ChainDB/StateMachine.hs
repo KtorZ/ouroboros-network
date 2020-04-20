@@ -75,8 +75,8 @@ import qualified Ouroboros.Network.MockChain.ProducerState as CPS
 import qualified Ouroboros.Network.Point as Point
 
 import           Ouroboros.Consensus.Block
-import           Ouroboros.Consensus.BlockchainTime (settableBlockchainTime)
 import           Ouroboros.Consensus.Config
+import qualified Ouroboros.Consensus.Fragment.InFuture as InFuture
 import           Ouroboros.Consensus.HeaderValidation
 import           Ouroboros.Consensus.Ledger.Abstract
 import           Ouroboros.Consensus.Ledger.Extended
@@ -1532,7 +1532,9 @@ mkArgs cfg chunkInfo initLedger tracer registry varCurSlot
     , cdbIsEBB                = testHeaderEpochNoIfEBB chunkInfo
     , cdbCheckIntegrity       = testBlockIsValid
     , cdbGenesis              = return initLedger
-    , cdbBlockchainTime       = settableBlockchainTime varCurSlot
+    , cdbCheckInFuture        = InFuture.miracle
+                                  (readTVar varCurSlot)
+                                  1 -- maximum clock skew of 1 block
     , cdbAddHdrEnv            = \_ _ -> id
     , cdbImmDbCacheConfig     = Index.CacheConfig 2 60
 
