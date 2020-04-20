@@ -177,6 +177,27 @@ import           Ouroboros.Consensus.Util.IOLike
   for the transactions that establish the transition point. The earliest point
   such a transaction could be included in the chain is after the hard fork
   transition, since it must be a transaction from the /new/ era.
+
+  NOTE ON STABILITY
+
+  If we used as yet /unconfirmed/ update proposals to determine hard fork
+  transition points, then any of the resulting time conversions would be
+  subject to rollback; if we switched to a different fork, time conversions
+  might suddenly look different. Whilst this /may/ be doable, in practice this
+  is a headache we would very much like to avoid. For example, it might mean
+  that when a block comes in and we determine that it's from the future,
+  we might have prematurely marked it as invalid. So, we insist that time
+  conversions must be based on update propsals that are /certain/ (no longer
+  subject to rollback). This means that the "safe zone" we have been discussing
+  above must extend from the point of stability forward. Moreover, the safe zone
+  must be long enough to include a sufficient number of blocks such that we can
+  evaluate enough headers of an alternative fork (without having its blocks)
+  to decide that we want to switch to that fork; since in the worst case that
+  means we have to evaluate @k@ headers (or @k+1@), the safe zone must be long
+  enough to cover @k@ blocks (and therefore a safe zone of @2k@ slots for Byron,
+  and (probably) a safe zone of @3k/f@ slots for Shelley). Effectively, this
+  means that consensus wants "stability itself to be stable"; we need a double
+  safe zone after an update proposal has been confirmed.
 -------------------------------------------------------------------------------}
 
 -- | Parameters that can vary across hard forks
@@ -207,6 +228,14 @@ data SafeZone = SafeZone {
       safeFromTip     :: !Word64
 
       -- | Optionally, an 'EpochNo' before which no hard fork can take place
+      --
+      -- NOTE: If the next era (say, Goguen) is already known, but the code is
+      -- not yet ready to switch to it, then using @LowerBound maxBound@ here
+      -- is safe: it would lead to wrong predictions about Goguen blocks, but
+      -- since there can't /be/ any Goguen blocks, that is not a problem. Doing
+      -- this will improve performance. Then, when an update to the code is
+      -- released that /is/ ready for the switch over, we can use the 'EpochNo'
+      -- of the then-current epoch as a lower bound.
     , safeBeforeEpoch :: !SafeBeforeEpoch
     }
   deriving stock    (Show, Generic)
