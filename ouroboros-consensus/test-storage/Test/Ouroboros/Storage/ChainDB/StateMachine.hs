@@ -128,7 +128,7 @@ import           Test.Util.WithEq
 -- | Commands
 data Cmd blk it rdr
   = AddBlock              blk
-  | AddFutureBlock        blk SlotNo -- ^ The current slot number
+--  | AddFutureBlock        blk SlotNo -- ^ The current slot number
   | GetCurrentChain
   | GetCurrentLedger
   | GetPastLedger         (Point blk)
@@ -346,7 +346,7 @@ run :: forall m blk. (IOLike m, LedgerSupportsProtocol blk)
 run env@ChainDBEnv { varDB, .. } cmd =
     readMVar varDB >>= \st@ChainDBState { chainDB = chainDB@ChainDB{..}, internal } -> case cmd of
       AddBlock blk             -> Point               <$> (advanceAndAdd st (blockSlot blk) blk)
-      AddFutureBlock blk s     -> Point               <$> (advanceAndAdd st s               blk)
+--      AddFutureBlock blk s     -> Point               <$> (advanceAndAdd st s               blk)
       GetCurrentChain          -> Chain               <$> atomically getCurrentChain
       GetCurrentLedger         -> Ledger              <$> atomically getCurrentLedger
       GetPastLedger pt         -> MbLedger            <$> getPastLedger chainDB pt
@@ -513,7 +513,7 @@ runPure :: forall blk.
         -> (Resp           blk IteratorId ReaderId, DBModel blk)
 runPure cfg = \case
     AddBlock blk             -> ok  Point               $ update  (advanceAndAdd (blockSlot blk) blk)
-    AddFutureBlock blk s     -> ok  Point               $ update  (advanceAndAdd s               blk)
+--    AddFutureBlock blk s     -> ok  Point               $ update  (advanceAndAdd s               blk)
     GetCurrentChain          -> ok  Chain               $ query   (Model.lastK k getHeader)
     GetCurrentLedger         -> ok  Ledger              $ query    Model.currentLedger
     GetPastLedger pt         -> ok  MbLedger            $ query   (Model.getPastLedger cfg pt)
@@ -823,7 +823,7 @@ generator genBlock m@Model {..} = At <$> frequency
                 $ dbModel
 
     genAddBlock = do
-      let curSlot = Model.currentSlot dbModel
+--      let curSlot = Model.currentSlot dbModel
       blk <- genBlock m
       if blockSlot blk > Model.currentSlot dbModel
         -- When the slot of the block is in the future, we can either advance
@@ -831,7 +831,7 @@ generator genBlock m@Model {..} = At <$> frequency
         -- future ('AddFutureBlock')
         then frequency
           [ (1, return $ AddBlock blk)
-          , (1, AddFutureBlock blk <$> chooseSlot curSlot (blockSlot blk - 1))
+--          , (1, AddFutureBlock blk <$> chooseSlot curSlot (blockSlot blk - 1))
           ]
         else return $ AddBlock blk
 
@@ -959,8 +959,8 @@ precondition Model {..} (At cmd) =
                                  Boolean (Map.null (Model.futureBlocks dbModel))
      Reopen                   -> Not $ Boolean (Model.isOpen dbModel)
      -- To be in the future, @blockSlot blk@ must be greater than @slot@.
-     AddFutureBlock blk s     -> s .>= Model.currentSlot dbModel .&&
-                                 blockSlot blk .> s
+--     AddFutureBlock blk s     -> s .>= Model.currentSlot dbModel .&&
+--                                 blockSlot blk .> s
      WipeVolDB                -> Boolean $ Model.isOpen dbModel
      _                        -> Top
   where
