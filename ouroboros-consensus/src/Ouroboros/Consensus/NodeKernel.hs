@@ -40,7 +40,6 @@ import           Ouroboros.Network.Block
 import           Ouroboros.Network.BlockFetch
 import           Ouroboros.Network.BlockFetch.State (FetchMode (..))
 import           Ouroboros.Network.NodeToNode (MiniProtocolParameters (..))
-import           Ouroboros.Network.Point (WithOrigin (..))
 import           Ouroboros.Network.TxSubmission.Inbound
                      (TxSubmissionMempoolWriter)
 import qualified Ouroboros.Network.TxSubmission.Inbound as Inbound
@@ -310,23 +309,12 @@ initBlockFetchConsensusInterface cfg chainDB getCandidates blockFetchSize
 
     readFetchMode :: STM m FetchMode
     readFetchMode = do
-      curSlot      <- getCurrentSlot btime
-      curChainSlot <- AF.headSlot <$> ChainDB.getCurrentChain chainDB
-      let slotsBehind = case curChainSlot of
-            -- There's nothing in the chain. If the current slot is 0, then
-            -- we're 1 slot behind.
-            Origin  -> unSlotNo curSlot + 1
-            At slot -> unSlotNo curSlot - unSlotNo slot
-          maxBlocksBehind = 5
-          -- Convert from blocks to slots. This is more or less the @f@
-          -- parameter, the frequency of blocks. TODO should be 10 for Praos,
-          -- so make this part of 'OuroborosTag'.
-          blocksToSlots = 1
-      return $ if slotsBehind < maxBlocksBehind * blocksToSlots
+      mCurSlot <- getCurrentSlot btime
        -- When the current chain is near to "now", use deadline mode, when it
        -- is far away, use bulk sync mode.
-        then FetchModeDeadline
-        else FetchModeBulkSync
+      return $ case mCurSlot of
+                 CurrentSlotUnknown -> FetchModeBulkSync
+                 CurrentSlot _      -> FetchModeDeadline
 
     readFetchedBlocks :: STM m (Point blk -> Bool)
     readFetchedBlocks = ChainDB.getIsFetched chainDB
