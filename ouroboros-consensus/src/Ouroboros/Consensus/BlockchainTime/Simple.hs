@@ -15,7 +15,7 @@ import           Data.Time (NominalDiffTime, diffUTCTime)
 import           Data.Void
 
 import           Cardano.Slotting.Slot
-import           Control.Tracer (Tracer, traceWith)
+import           Control.Tracer (Tracer)
 
 import           Ouroboros.Network.Block (SlotNo)
 
@@ -37,13 +37,7 @@ simpleBlockchainTime :: forall m. IOLike m
                      -> SlotLength
                      -> m (BlockchainTime m)
 simpleBlockchainTime registry tracer start slotLen = do
-    now <- getCurrentTime
-
-    -- Wait until system start if necessary
-    when (getSystemStart start > now) $ do
-      let delay = getSystemStart start `diffUTCTime` now
-      traceWith tracer $ TraceStartTimeInTheFuture start delay
-      threadDelay (nominalDelay delay)
+    waitUntilSystemStart tracer start
 
     -- Fork thread that continuously updates the current slot
     firstSlot <- fst <$> getWallClockSlot start slotLen

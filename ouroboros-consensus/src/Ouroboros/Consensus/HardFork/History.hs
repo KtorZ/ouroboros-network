@@ -51,6 +51,7 @@ module Ouroboros.Consensus.HardFork.History (
   , snapshotEpochInfo
     -- * Caching
   , RunWithCachedSummary(..)
+  , cachedRunQueryThrow
   , runWithCachedSummary
     -- * Exported only for the benefit of tests
     -- ** Bounds
@@ -95,10 +96,12 @@ import           Cardano.Prelude (NoUnexpectedThunks, OnlyCheckIsWHNF (..))
 import           Cardano.Slotting.EpochInfo.API
 import           Cardano.Slotting.Slot
 
-import           Ouroboros.Consensus.BlockchainTime
 import           Ouroboros.Consensus.Protocol.Abstract
 import           Ouroboros.Consensus.Util.Counting
 import           Ouroboros.Consensus.Util.IOLike
+
+-- Import from @.WallClock@ to avoid circular dependencies
+import           Ouroboros.Consensus.BlockchainTime.WallClock
 
 {-------------------------------------------------------------------------------
   OVERVIEW
@@ -655,11 +658,7 @@ data PastHorizonException =
     -- beyond which we lack information due to uncertainty about the next
     -- hard fork.
     --
-    -- We record both the hard fork summary and the thing that we are looking
-    -- for. Although both of these are internal types that can strictly speaking
-    -- leak out of the API through this exception, they are provided here
-    -- merely for debugging: if this exception is ever raised, it indicates
-    -- a bug somewhere.
+    -- We record the hard fork summary and the thing that we are looking for.
     forall xs. PastHorizon (Summary xs) Condition
 
 deriving instance Show PastHorizonException
@@ -782,19 +781,32 @@ epochToSlot epoch = mkQuery $ \summary ->
   Caching the summary
 -------------------------------------------------------------------------------}
 
+-- | Stateful abstraction to execute queries
 data RunWithCachedSummary xs m = RunWithCachedSummary {
-      cachedRunQuery :: forall a. Query xs a -> STM m a
+      -- | Run the specified query
+      --
+      -- If the query fails with a 'PastHorizonException', it will update its
+      -- internal state (compute a new summary) and try again. If that /still/
+      -- fails, the 'PastHorizonException' is returned.
+      --
+      -- See also 'cachedRunQueryThrow'.
+      cachedRunQuery :: forall a. Query xs a
+                     -> STM m (Either PastHorizonException a)
     }
 
--- | Cache the 'Summary'
+-- | Wrapper around 'cachedRunQuery' which throws the 'PastHorizonException'
 --
--- Whenever the action requires the 'Summary', we use the cached value rather
--- than computing it every time. If the action throws a 'PastHorizonException'
--- with the cached summary, we construct a new summary at that point and try
--- again. We do not catch the exception the second time: if the action still
--- throws an exception with the updated summary, it indicates a bug in the
--- caller (trying to look ahead too far).
-runWithCachedSummary :: forall m xs. (MonadSTM m, MonadThrow (STM m))
+-- This is useful for callers who know that their queries should not be past
+-- the horizon (and it would be a bug if they were).
+cachedRunQueryThrow :: (MonadSTM m, MonadThrow (STM m))
+                    => RunWithCachedSummary xs m -> Query xs a -> STM m a
+cachedRunQueryThrow run qry = either throwM return =<< cachedRunQuery run qry
+
+-- | Construct 'RunWithCachedSummary' given action that computes the summary
+--
+-- Most use cases will probably construct this action from an action that reads
+-- the ledger state and then computes the summary from that.
+runWithCachedSummary :: forall m xs. MonadSTM m
                      => STM m (Summary xs)
                      -> m (RunWithCachedSummary xs m)
 runWithCachedSummary getSummary = do
@@ -802,15 +814,16 @@ runWithCachedSummary getSummary = do
     var <- newTVarM initSummary
     return $ RunWithCachedSummary { cachedRunQuery = go var }
   where
-    go :: StrictTVar m (Summary xs) -> Query xs a -> STM m a
+    go :: StrictTVar m (Summary xs)
+       -> Query xs a -> STM m (Either PastHorizonException a)
     go var q = do
         summary <- readTVar var
         case runQuery q summary of
-          Right a             -> return a
+          Right a             -> return (Right a)
           Left  PastHorizon{} -> do
             summary' <- getSummary
             writeTVar var summary'
-            runQueryThrow q summary'
+            return $ runQuery q summary'
 
 {-------------------------------------------------------------------------------
   Translation to EpochInfo
@@ -827,10 +840,10 @@ summaryToEpochInfo =
     fmap go . runWithCachedSummary
   where
     go :: RunWithCachedSummary xs m -> EpochInfo (STM m)
-    go RunWithCachedSummary{..} = EpochInfo {
-          epochInfoSize  = \epoch -> cachedRunQuery (snd <$> epochToSlot epoch)
-        , epochInfoFirst = \epoch -> cachedRunQuery (fst <$> epochToSlot epoch)
-        , epochInfoEpoch = \slot  -> cachedRunQuery (fst <$> slotToEpoch slot)
+    go run = EpochInfo {
+          epochInfoSize  = \e -> cachedRunQueryThrow run (snd <$> epochToSlot e)
+        , epochInfoFirst = \e -> cachedRunQueryThrow run (fst <$> epochToSlot e)
+        , epochInfoEpoch = \s -> cachedRunQueryThrow run (fst <$> slotToEpoch s)
         }
 
 -- | Construct an 'EpochInfo' for a /snapshot/ of the ledger state
@@ -839,9 +852,9 @@ summaryToEpochInfo =
 -- error as a /pure/ exception. Such an exception would indicate a bug.
 snapshotEpochInfo :: forall xs. Summary xs -> EpochInfo Identity
 snapshotEpochInfo summary = EpochInfo {
-      epochInfoSize  = \epoch -> runQueryPure' (snd <$> epochToSlot epoch)
-    , epochInfoFirst = \epoch -> runQueryPure' (fst <$> epochToSlot epoch)
-    , epochInfoEpoch = \slot  -> runQueryPure' (fst <$> slotToEpoch slot)
+      epochInfoSize  = \e -> runQueryPure' (snd <$> epochToSlot e)
+    , epochInfoFirst = \e -> runQueryPure' (fst <$> epochToSlot e)
+    , epochInfoEpoch = \s -> runQueryPure' (fst <$> slotToEpoch s)
     }
   where
     runQueryPure' :: Query xs a -> Identity a
