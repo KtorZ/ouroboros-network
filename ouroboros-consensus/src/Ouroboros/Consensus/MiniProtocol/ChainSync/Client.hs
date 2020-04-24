@@ -587,7 +587,7 @@ chainSyncClient mkPipelineDecision0 tracer cfg btime
               (requestNext kis mkPipelineDecision' (Succ n) theirTip candTipBlockNo)
           (Succ n', (CollectOrPipeline, mkPipelineDecision')) ->
             CollectResponse
-              (Just $ SendMsgRequestNextPipelined $
+              (Just $ pure $ SendMsgRequestNextPipelined $
                 requestNext kis mkPipelineDecision' (Succ n) theirTip candTipBlockNo)
               (handleNext kis mkPipelineDecision' n')
           (Succ n', (Collect, mkPipelineDecision')) ->
