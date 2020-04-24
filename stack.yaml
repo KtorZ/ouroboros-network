@@ -1,25 +1,24 @@
 resolver: https://raw.githubusercontent.com/input-output-hk/cardano-prelude/0c5b0a6619fadf22f4d62a12154e181a6d035c1c/snapshot.yaml
 
 packages:
-  - ./typed-protocols
-  - ./typed-protocols-examples
-  - ./network-mux
-  - ./ouroboros-network-framework
-  - ./ouroboros-network
-  - ./ouroboros-network-testing
-  - ./ouroboros-consensus
-  - ./ouroboros-consensus/ouroboros-consensus-test-infra
-  - ./ouroboros-consensus/ouroboros-consensus-mock
-  - ./ouroboros-consensus-byron
-  - ./ouroboros-consensus-byron-test
-  - ./ouroboros-consensus-byronspec
-  - ./ouroboros-consensus-shelley
-  - ./ouroboros-consensus-shelley-test
-  - ./ouroboros-consensus-cardano
-  - ./io-sim
-  - ./io-sim-classes
-  - ./ntp-client
-  - ./Win32-network
+  - io-sim
+  - io-sim-classes
+  - network-mux
+  - ntp-client
+  - ouroboros-consensus
+  - ouroboros-consensus-byron
+  # - ouroboros-consensus-byron-test
+  # - ouroboros-consensus-byronspec
+  - ouroboros-consensus-cardano
+  - ouroboros-consensus-mock
+  - ouroboros-consensus-shelley
+  # - ouroboros-consensus-test
+  - ouroboros-network
+  - ouroboros-network-framework
+  - ouroboros-network-testing
+  - typed-protocols
+  - typed-protocols-examples
+  - Win32-network
 
 flags:
   io-sim-classes:
@@ -38,7 +37,7 @@ flags:
 
 extra-deps:
   - git: https://github.com/input-output-hk/iohk-monitoring-framework
-    commit: d8f35c3c725be67148681227f9d64876f5909120
+    commit: 743f266cfe5fff11d18602faf510f22a544ea295
     subdirs:
       - contra-tracer
 
@@ -69,8 +68,6 @@ extra-deps:
   # Needed for `cardano-ledger-specs`
   - git: https://github.com/input-output-hk/goblins
     commit: cde90a2b27f79187ca8310b6549331e59595e7ba
-  - moo-1.2
-  - gray-code-0.3.1
 
   - git: https://github.com/input-output-hk/cardano-prelude
     commit: 0c5b0a6619fadf22f4d62a12154e181a6d035c1c
@@ -78,25 +75,25 @@ extra-deps:
       - .
       - test
 
-  - git: https://github.com/input-output-hk/cardano-crypto/
+  - git: https://github.com/input-output-hk/cardano-crypto
     commit: 2547ad1e80aeabca2899951601079408becbc92c
 
   - bimap-0.4.0
   - binary-0.8.7.0
   - generic-monoid-0.1.0.0
-  - graphviz-2999.20.1.3
   - hedgehog-quickcheck-0.1.1
-  - markov-chain-usage-model-0.0.0  # Needed for `quickcheck-state-machine`
-  - network-3.1.0.1
-  - quickcheck-state-machine-0.7.0
+  - network-3.1.1.1
   - quiet-0.2
   - sop-core-0.5.0.1
-  - split-0.2.3.4
-  - splitmix-0.0.2
   - statistics-linreg-0.3
   - tasty-hedgehog-1.0.0.2
   - text-1.2.4.0
+  - moo-1.2
+  - gray-code-0.3.1
   - Unique-0.4.7.6
+  - graphviz-2999.20.1.0
+  - partial-order-0.2.0.0
+  - primitive-0.6.4.0
 
   # Windows only
   - Win32-2.6.2.0
